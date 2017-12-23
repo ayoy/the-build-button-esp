@@ -184,6 +184,80 @@ static prepare_type_env_t idle_prepare_write_env;
 void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
+
+
+uint8_t is_idle = 0;
+#define BUTTON_GPIO 25
+#define LED_GPIO 26
+
+void button_handler_task(void *pvParameter)
+{
+    ESP_LOGI(GATTS_TAG, "Starting button handler task");
+
+    /* Configure the IOMUX register for pad BUTTON_GPIO (some pads are
+       muxed to GPIO on reset already, but some default to other
+       functions and need to be switched to GPIO. Consult the
+       Technical Reference for a list of pads and their default
+       functions.)
+    */
+    gpio_pad_select_gpio(BUTTON_GPIO);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
+
+    gpio_pad_select_gpio(LED_GPIO);
+    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(LED_GPIO, GPIO_PULLUP_ONLY);
+    gpio_set_level(LED_GPIO, 0);
+
+    int level = gpio_get_level(BUTTON_GPIO);
+    if (level == 0) {
+        ESP_LOGE(GATTS_TAG, "Pin %i low, but should be high -,-", BUTTON_GPIO);
+    }
+    while(1) {
+        if (gpio_get_level(BUTTON_GPIO) != level) {
+            level = gpio_get_level(BUTTON_GPIO);
+            if (level == 1) {
+                ESP_LOGI(GATTS_TAG, "Pin %i high again", BUTTON_GPIO);
+                gpio_set_level(LED_GPIO, 0);
+            } else {
+                ESP_LOGI(GATTS_TAG, "Pin %i low!", BUTTON_GPIO);
+                if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
+                    gpio_set_level(LED_GPIO, 1);
+                    ESP_LOGI(GATTS_TAG, "notifying :)");
+
+                    uint8_t notify_data[15];
+                    for (int i = 0; i < sizeof(notify_data); ++i)
+                    {
+                        notify_data[i] = i%0xff;
+                    }
+                    //the size of notify_data[] need less than MTU size
+                    esp_ble_gatts_send_indicate(gl_profile_tab[TRIGGER_APP_ID].gatts_if,
+                        gl_profile_tab[TRIGGER_APP_ID].conn_id,
+                        gl_profile_tab[TRIGGER_APP_ID].char_handle,
+                        sizeof(notify_data), notify_data, false);
+
+                    is_idle = 0;
+                    vTaskDelete(NULL);
+                }
+            }
+        }
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+}
+
+void update_idle_flag(uint16_t value) 
+{
+    if (is_idle != value) {
+        is_idle = value;
+        if (is_idle) {
+            xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
+        }
+    }
+}
+
+
+
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     switch (event) {
@@ -506,42 +580,12 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
     case ESP_GATTS_WRITE_EVT: {
         ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
         if (!param->write.is_prep){
-            ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
+            ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value:", param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
-            if (gl_profile_tab[IDLE_APP_ID].descr_handle == param->write.handle && param->write.len == 2){
-                uint16_t descr_value= param->write.value[1]<<8 | param->write.value[0];
-                if (descr_value == 0x0001){
-                    if (b_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY){
-                        ESP_LOGI(GATTS_TAG, "notify enable");
-                        uint8_t notify_data[15];
-                        for (int i = 0; i < sizeof(notify_data); ++i)
-                        {
-                            notify_data[i] = i%0xff;
-                        }
-                        //the size of notify_data[] need less than MTU size
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[IDLE_APP_ID].char_handle,
-                                                sizeof(notify_data), notify_data, false);
-                    }
-                }else if (descr_value == 0x0002){
-                    if (b_property & ESP_GATT_CHAR_PROP_BIT_INDICATE){
-                        ESP_LOGI(GATTS_TAG, "indicate enable");
-                        uint8_t indicate_data[15];
-                        for (int i = 0; i < sizeof(indicate_data); ++i)
-                        {
-                            indicate_data[i] = i%0xff;
-                        }
-                        //the size of indicate_data[] need less than MTU size
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[IDLE_APP_ID].char_handle,
-                                                sizeof(indicate_data), indicate_data, true);
-                    }
-                }
-                else if (descr_value == 0x0000){
-                    ESP_LOGI(GATTS_TAG, "notify/indicate disable ");
-                }else{
-                    ESP_LOGE(GATTS_TAG, "unknown value");
-                }
-
+            if (param->write.len == 1) {
+                update_idle_flag(param->write.value[0]);
             }
+            //TODO: response?
         }
         example_write_event_env(gatts_if, &idle_prepare_write_env, param);
         break;
@@ -651,60 +695,6 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
-#define BUTTON_GPIO 25
-#define LED_GPIO 26
-
-void button_handler_task(void *pvParameter)
-{
-    /* Configure the IOMUX register for pad BUTTON_GPIO (some pads are
-       muxed to GPIO on reset already, but some default to other
-       functions and need to be switched to GPIO. Consult the
-       Technical Reference for a list of pads and their default
-       functions.)
-    */
-    gpio_pad_select_gpio(BUTTON_GPIO);
-    /* Set the GPIO as a push/pull output */
-    gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
-
-    gpio_pad_select_gpio(LED_GPIO);
-    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_pull_mode(LED_GPIO, GPIO_PULLUP_ONLY);
-    gpio_set_level(LED_GPIO, 0);
-
-    int level = gpio_get_level(BUTTON_GPIO);
-    if (level == 0) {
-        ESP_LOGE(GATTS_TAG, "Pin %i low, but should be high -,-", BUTTON_GPIO);
-    }
-    while(1) {
-        if (gpio_get_level(BUTTON_GPIO) != level) {
-            level = gpio_get_level(BUTTON_GPIO);
-            if (level == 1) {
-                ESP_LOGI(GATTS_TAG, "Pin %i high again", BUTTON_GPIO);
-                gpio_set_level(LED_GPIO, 0);
-            } else {
-                ESP_LOGI(GATTS_TAG, "Pin %i low!", BUTTON_GPIO);
-                if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
-                    gpio_set_level(LED_GPIO, 1);
-                    ESP_LOGI(GATTS_TAG, "notifying :)");
-
-                    uint8_t notify_data[15];
-                    for (int i = 0; i < sizeof(notify_data); ++i)
-                    {
-                        notify_data[i] = i%0xff;
-                    }
-                    //the size of notify_data[] need less than MTU size
-                    esp_ble_gatts_send_indicate(gl_profile_tab[TRIGGER_APP_ID].gatts_if,
-                        gl_profile_tab[TRIGGER_APP_ID].conn_id,
-                        gl_profile_tab[TRIGGER_APP_ID].char_handle,
-                        sizeof(notify_data), notify_data, false);
-                }
-                vTaskDelay(4900 / portTICK_PERIOD_MS);
-            }
-        }
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
-}
 
 void app_main()
 {
@@ -765,8 +755,6 @@ void app_main()
     if (local_mtu_ret){
         ESP_LOGE(GATTS_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
-
-    xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
 
     return;
 }

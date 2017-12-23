@@ -555,6 +555,38 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
+#define BUTTON_GPIO 25
+
+void button_handler_task(void *pvParameter)
+{
+    /* Configure the IOMUX register for pad BUTTON_GPIO (some pads are
+       muxed to GPIO on reset already, but some default to other
+       functions and need to be switched to GPIO. Consult the
+       Technical Reference for a list of pads and their default
+       functions.)
+    */
+    gpio_pad_select_gpio(BUTTON_GPIO);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
+    int level = gpio_get_level(BUTTON_GPIO);
+    if (level == 0) {
+        ESP_LOGE(GATTS_TAG, "Pin %i low, but should be high -,-", BUTTON_GPIO);
+    }
+    while(1) {
+        if (gpio_get_level(BUTTON_GPIO) != level) {
+            level = gpio_get_level(BUTTON_GPIO);
+            if (level == 1) {
+                ESP_LOGI(GATTS_TAG, "Pin %i high again\n", BUTTON_GPIO);
+            } else {
+                ESP_LOGI(GATTS_TAG, "Pin %i low!\n", BUTTON_GPIO);
+                vTaskDelay(4900 / portTICK_PERIOD_MS);
+            }
+        }
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+}
+
 void app_main()
 {
     esp_err_t ret;
@@ -611,6 +643,8 @@ void app_main()
     }
 
     // esp_ble_gatts_send_indicate(esp_gatt_if_t gatts_if, uint16_t conn_id, uint16_t attr_handle, uint16_t value_len, uint8_t *value, bool need_confirm)
+
+    xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
 
     return;
 }

@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := gatt_server_demos
+PROJECT_NAME := build_button
 
 COMPONENT_ADD_INCLUDEDIRS := components/include
 

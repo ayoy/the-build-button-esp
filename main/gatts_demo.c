@@ -44,6 +44,9 @@
 
 #define GATTS_TAG "GATTS_DEMO"
 
+esp_gatt_if_t current_gatts_if = 0;
+uint16_t current_conn_id = 0;
+
 ///Declare the static function
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 
@@ -384,19 +387,11 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                             notify_data[i] = i%0xff;
                         }
                         //the size of notify_data[] need less than MTU size
+                        current_gatts_if = gatts_if;
+                        current_conn_id = param->write.conn_id;
+                        ESP_LOGI(GATTS_TAG, "current_gatts_if: %d, current_conn_id: %d", current_gatts_if, current_conn_id);
                         esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
                                                 sizeof(notify_data), notify_data, false);
-                        // while (1) {
-                        //     vTaskDelay(1000 / portTICK_PERIOD_MS);                         
-                        //     ESP_LOGI(GATTS_TAG, "notifying");
-                        //     uint8_t data[4];
-                        //     data[0] = 0xde;
-                        //     data[1] = 0xed;
-                        //     data[2] = 0xbe;
-                        //     data[3] = 0xef;
-                        //     esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
-                        //                                 sizeof(data), data, true);
-                        // }
                     }
                 }else if (descr_value == 0x0002){
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_INDICATE){
@@ -556,6 +551,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 }
 
 #define BUTTON_GPIO 25
+#define LED_GPIO 26
 
 void button_handler_task(void *pvParameter)
 {
@@ -569,6 +565,12 @@ void button_handler_task(void *pvParameter)
     /* Set the GPIO as a push/pull output */
     gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
     gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
+
+    gpio_pad_select_gpio(LED_GPIO);
+    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(LED_GPIO, GPIO_PULLUP_ONLY);
+    gpio_set_level(LED_GPIO, 0);
+
     int level = gpio_get_level(BUTTON_GPIO);
     if (level == 0) {
         ESP_LOGE(GATTS_TAG, "Pin %i low, but should be high -,-", BUTTON_GPIO);
@@ -578,8 +580,22 @@ void button_handler_task(void *pvParameter)
             level = gpio_get_level(BUTTON_GPIO);
             if (level == 1) {
                 ESP_LOGI(GATTS_TAG, "Pin %i high again\n", BUTTON_GPIO);
+                gpio_set_level(LED_GPIO, 0);
             } else {
                 ESP_LOGI(GATTS_TAG, "Pin %i low!\n", BUTTON_GPIO);
+                if (current_gatts_if != 0) {
+                    gpio_set_level(LED_GPIO, 1);
+                    ESP_LOGI(GATTS_TAG, "notifying :)");
+
+                    uint8_t notify_data[15];
+                    for (int i = 0; i < sizeof(notify_data); ++i)
+                    {
+                        notify_data[i] = i%0xff;
+                    }
+                    //the size of notify_data[] need less than MTU size
+                    esp_ble_gatts_send_indicate(current_gatts_if, current_conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
+                                            sizeof(notify_data), notify_data, false);
+                }
                 vTaskDelay(4900 / portTICK_PERIOD_MS);
             }
         }
@@ -641,8 +657,6 @@ void app_main()
     if (local_mtu_ret){
         ESP_LOGE(GATTS_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
-
-    // esp_ble_gatts_send_indicate(esp_gatt_if_t gatts_if, uint16_t conn_id, uint16_t attr_handle, uint16_t value_len, uint8_t *value, bool need_confirm)
 
     xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
 

@@ -188,8 +188,64 @@ void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble
 
 
 uint8_t is_idle = 0;
-#define BUTTON_GPIO 25
-#define LED_GPIO 26
+#define BUTTON_GPIO (25)
+#define LED_GPIO (26)
+#define LED_FADE_TIME (3000)
+#define LED_DUTY_MAX (2047)
+#define LED_DUTY_MIN (100)
+TaskHandle_t pwm_task_handle = NULL;
+
+#include "driver/ledc.h"
+
+void tear_down_pwm_task(ledc_channel_config_t *config)
+{
+    ledc_set_duty(config->speed_mode, config->channel, 0);
+    ledc_update_duty(config->speed_mode, config->channel);
+    ledc_fade_func_uninstall();
+    vTaskDelete(NULL);
+}
+
+void pwm_task(void *pvParameter)
+{
+    ESP_LOGI(GATTS_TAG, "Starting LED PWM task");
+
+    ledc_timer_config_t ledc_timer = {
+        .duty_resolution = LEDC_TIMER_13_BIT, // resolution of PWM duty
+        .freq_hz = 5000,                      // frequency of PWM signal
+        .speed_mode = LEDC_HIGH_SPEED_MODE,    // timer mode
+        .timer_num = LEDC_TIMER_0             // timer index
+    };
+
+    ledc_channel_config_t ledc_config = {
+        .gpio_num = LED_GPIO,
+        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .duty = 200,
+        .channel = LEDC_CHANNEL_0,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = LEDC_TIMER_0,
+    };
+
+    // esp_err_t ret;
+    ledc_timer_config(&ledc_timer);
+    ledc_channel_config(&ledc_config);
+    ledc_fade_func_install(0);
+
+    while (1) {
+        ESP_LOGI(GATTS_TAG, "1. LEDC fade up to duty = %d\n", LED_DUTY_MAX);
+        ledc_set_fade_with_time(ledc_config.speed_mode, ledc_config.channel, LED_DUTY_MAX, LED_FADE_TIME/2);
+        ledc_fade_start(ledc_config.speed_mode, ledc_config.channel, LEDC_FADE_WAIT_DONE);
+        if (is_idle) {
+            tear_down_pwm_task(&ledc_config);
+        }
+
+        ESP_LOGI(GATTS_TAG, "2. LEDC fade down to duty = %d\n", LED_DUTY_MIN);
+        ledc_set_fade_with_time(ledc_config.speed_mode, ledc_config.channel, LED_DUTY_MIN, LED_FADE_TIME/2);
+        ledc_fade_start(ledc_config.speed_mode, ledc_config.channel, LEDC_FADE_WAIT_DONE);
+        if (is_idle) {
+            tear_down_pwm_task(&ledc_config);
+        }
+    }
+}
 
 void button_handler_task(void *pvParameter)
 {
@@ -206,11 +262,6 @@ void button_handler_task(void *pvParameter)
     gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
     gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
 
-    gpio_pad_select_gpio(LED_GPIO);
-    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_pull_mode(LED_GPIO, GPIO_PULLUP_ONLY);
-    gpio_set_level(LED_GPIO, 0);
-
     int level = gpio_get_level(BUTTON_GPIO);
     if (level == 0) {
         ESP_LOGE(GATTS_TAG, "Pin %i low, but should be high -,-", BUTTON_GPIO);
@@ -218,13 +269,11 @@ void button_handler_task(void *pvParameter)
     while(1) {
         if (gpio_get_level(BUTTON_GPIO) != level) {
             level = gpio_get_level(BUTTON_GPIO);
-            if (level == 1) {
-                ESP_LOGI(GATTS_TAG, "Pin %i high again", BUTTON_GPIO);
-                gpio_set_level(LED_GPIO, 0);
-            } else {
+            if (level == 0) {
                 ESP_LOGI(GATTS_TAG, "Pin %i low!", BUTTON_GPIO);
                 if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
-                    gpio_set_level(LED_GPIO, 1);
+                    xTaskCreate(&pwm_task, "LED_PWM_task", 3072, NULL, 5, &pwm_task_handle);
+
                     ESP_LOGI(GATTS_TAG, "notifying :)");
 
                     uint8_t notify_data[15];

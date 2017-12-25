@@ -31,6 +31,7 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_wifi.h"
 #include "esp_bt.h"
 
 #include "esp_gap_ble_api.h"
@@ -698,6 +699,8 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 
 void app_main()
 {
+    esp_wifi_set_mode(WIFI_MODE_NULL);
+
     esp_err_t ret;
 
     // Initialize NVS.

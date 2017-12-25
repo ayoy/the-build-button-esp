@@ -418,27 +418,27 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                 if (descr_value == 0x0001){
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY){
                         ESP_LOGI(GATTS_TAG, "notify enable");
-                        uint8_t notify_data[15];
-                        for (int i = 0; i < sizeof(notify_data); ++i)
-                        {
-                            notify_data[i] = i%0xff;
-                        }
-                        //the size of notify_data[] need less than MTU size
-                        ESP_LOGI(GATTS_TAG, "current_gatts_if: %d, current_conn_id: %d", gatts_if, param->write.conn_id);
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[TRIGGER_APP_ID].char_handle,
-                                                sizeof(notify_data), notify_data, false);
+                        // uint8_t notify_data[15];
+                        // for (int i = 0; i < sizeof(notify_data); ++i)
+                        // {
+                        //     notify_data[i] = i%0xff;
+                        // }
+                        // //the size of notify_data[] need less than MTU size
+                        // ESP_LOGI(GATTS_TAG, "current_gatts_if: %d, current_conn_id: %d", gatts_if, param->write.conn_id);
+                        // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[TRIGGER_APP_ID].char_handle,
+                        //                         sizeof(notify_data), notify_data, false);
                     }
                 }else if (descr_value == 0x0002){
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_INDICATE){
                         ESP_LOGI(GATTS_TAG, "indicate enable");
-                        uint8_t indicate_data[15];
-                        for (int i = 0; i < sizeof(indicate_data); ++i)
-                        {
-                            indicate_data[i] = i%0xff;
-                        }
-                        //the size of indicate_data[] need less than MTU size
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[TRIGGER_APP_ID].char_handle,
-                                                sizeof(indicate_data), indicate_data, true);
+                        // uint8_t indicate_data[15];
+                        // for (int i = 0; i < sizeof(indicate_data); ++i)
+                        // {
+                        //     indicate_data[i] = i%0xff;
+                        // }
+                        // //the size of indicate_data[] need less than MTU size
+                        // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[TRIGGER_APP_ID].char_handle,
+                        //                         sizeof(indicate_data), indicate_data, true);
                     }
                 }
                 else if (descr_value == 0x0000){

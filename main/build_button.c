@@ -41,6 +41,7 @@
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
 #include "driver/rtc_io.h"
+#include "soc/rtc_cntl_reg.h"
 
 #include "sdkconfig.h"
 
@@ -308,24 +309,33 @@ void button_handler_task(void *pvParameter)
 TaskHandle_t deep_sleep_task_handle = NULL;
 TaskHandle_t button_handler_task_handle = NULL;
 
-void deep_sleep_task(void *pvParameter)
+void enter_deep_sleep()
 {
-    ESP_LOGE(GATTS_TAG, "Starting deep sleep task");
-    vTaskDelay(20 * 1000 / portTICK_PERIOD_MS);
-
-    esp_sleep_enable_ext0_wakeup(BUTTON_GPIO, 0);
-    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
-    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF);
-
     if (button_handler_task_handle) {
         vTaskDelete(button_handler_task_handle);
         button_handler_task_handle = NULL;
     }
 
-    esp_bluedroid_disable();
-    esp_bt_controller_disable();
+    const uint64_t ext_wakeup_pin_mask = 1ULL << BUTTON_GPIO;
+    esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_mask, ESP_EXT1_WAKEUP_ALL_LOW);
+
+    if (esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_UNINITIALIZED) {
+        esp_bluedroid_disable();
+    }
+    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED) {
+        esp_bt_controller_disable();
+    }
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
     ESP_LOGE(GATTS_TAG, "Entering deep sleep");
     esp_deep_sleep_start();
+}
+
+void deep_sleep_task(void *pvParameter)
+{
+    ESP_LOGE(GATTS_TAG, "Starting deep sleep task");
+    vTaskDelay(20 * 1000 / portTICK_PERIOD_MS);
+    enter_deep_sleep();
 }
 
 void update_idle_flag(uint16_t value) 
@@ -508,7 +518,7 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                     ESP_LOGE(GATTS_TAG, "unknown descr value");
                     esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
                 }
-                if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0 && wake_up_handled == 0) {
+                if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 && wake_up_handled == 0) {
                     wake_up_handled = 1;
                     ESP_LOGE(GATTS_TAG, "TRIGGERED FROM WRITE EVENT HANDLER");
                     if (button_handler_task_handle) {
@@ -745,67 +755,72 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 
 void app_main()
 {
-    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
-        rtc_gpio_deinit(BUTTON_GPIO);
-    }
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
+        ESP_LOGE(GATTS_TAG, "WAKE UP CAUSE: DEEP SLEEP INTERRUPT");
+        // rtc_gpio_deinit(BUTTON_GPIO);
 
-    esp_err_t ret;
+        esp_err_t ret;
 
-    // Initialize NVS.
-    ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
+        // Initialize NVS.
         ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK( ret );
+        if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
+            ESP_ERROR_CHECK(nvs_flash_erase());
+            ret = nvs_flash_init();
+        }
+        ESP_ERROR_CHECK( ret );
 
-    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    ret = esp_bt_controller_init(&bt_cfg);
-    if (ret) {
-        ESP_LOGE(GATTS_TAG, "%s initialize controller failed", __func__);
-        return;
-    }
+        esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+        ret = esp_bt_controller_init(&bt_cfg);
+        if (ret) {
+            ESP_LOGE(GATTS_TAG, "%s initialize controller failed", __func__);
+            return;
+        }
 
-    ret = esp_bt_controller_enable(ESP_BT_MODE_BTDM);
-    if (ret) {
-        ESP_LOGE(GATTS_TAG, "%s enable controller failed", __func__);
-        return;
-    }
-    ret = esp_bluedroid_init();
-    if (ret) {
-        ESP_LOGE(GATTS_TAG, "%s init bluetooth failed", __func__);
-        return;
-    }
-    ret = esp_bluedroid_enable();
-    if (ret) {
-        ESP_LOGE(GATTS_TAG, "%s enable bluetooth failed", __func__);
-        return;
-    }
+        ret = esp_bt_controller_enable(ESP_BT_MODE_BTDM);
+        if (ret) {
+            ESP_LOGE(GATTS_TAG, "%s enable controller failed", __func__);
+            return;
+        }
+        ret = esp_bluedroid_init();
+        if (ret) {
+            ESP_LOGE(GATTS_TAG, "%s init bluetooth failed", __func__);
+            return;
+        }
+        ret = esp_bluedroid_enable();
+        if (ret) {
+            ESP_LOGE(GATTS_TAG, "%s enable bluetooth failed", __func__);
+            return;
+        }
 
-    ret = esp_ble_gatts_register_callback(gatts_event_handler);
-    if (ret){
-        ESP_LOGE(GATTS_TAG, "gatts register error, error code = %x", ret);
-        return;
-    }
-    ret = esp_ble_gap_register_callback(gap_event_handler);
-    if (ret){
-        ESP_LOGE(GATTS_TAG, "gap register error, error code = %x", ret);
-        return;
-    }
-    ret = esp_ble_gatts_app_register(TRIGGER_APP_ID);
-    if (ret){
-        ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
-        return;
-    }
-    ret = esp_ble_gatts_app_register(IDLE_APP_ID);
-    if (ret){
-        ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
-        return;
-    }
-    esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(500);
-    if (local_mtu_ret){
-        ESP_LOGE(GATTS_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
-    }
+        ret = esp_ble_gatts_register_callback(gatts_event_handler);
+        if (ret){
+            ESP_LOGE(GATTS_TAG, "gatts register error, error code = %x", ret);
+            return;
+        }
+        ret = esp_ble_gap_register_callback(gap_event_handler);
+        if (ret){
+            ESP_LOGE(GATTS_TAG, "gap register error, error code = %x", ret);
+            return;
+        }
+        ret = esp_ble_gatts_app_register(TRIGGER_APP_ID);
+        if (ret){
+            ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
+            return;
+        }
+        ret = esp_ble_gatts_app_register(IDLE_APP_ID);
+        if (ret){
+            ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
+            return;
+        }
+        esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(500);
+        if (local_mtu_ret){
+            ESP_LOGE(GATTS_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
+        }
 
+    } else {
+        ESP_LOGE(GATTS_TAG, "WAKE UP CAUSE: NORMAL BOOT-UP");
+        ESP_LOGE(GATTS_TAG, "entering deep sleep right after boot-up");
+        enter_deep_sleep();
+    }
     return;
 }

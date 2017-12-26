@@ -187,9 +187,6 @@ static prepare_type_env_t trigger_prepare_write_env;
 static prepare_type_env_t idle_prepare_write_env;
 
 void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
-void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
-
-
 
 uint8_t is_idle = 0;
 #define BUTTON_GPIO (25)
@@ -274,7 +271,7 @@ void trigger_action()
 
 void button_handler_task(void *pvParameter)
 {
-    ESP_LOGI(GATTS_TAG, "Starting button handler task");
+    ESP_LOGE(GATTS_TAG, "Starting button handler task");
 
     /* Configure the IOMUX register for pad BUTTON_GPIO (some pads are
        muxed to GPIO on reset already, but some default to other
@@ -299,6 +296,7 @@ void button_handler_task(void *pvParameter)
                 if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
                     ESP_LOGE(GATTS_TAG, "TRIGGERED FROM BUTTON HANDLER TASK");
                     trigger_action();
+                    ESP_LOGE(GATTS_TAG, "Stopping button handler task");
                     vTaskDelete(NULL);
                 }
             }
@@ -436,19 +434,6 @@ void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare
     }
 }
 
-void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param){
-    if (param->exec_write.exec_write_flag == ESP_GATT_PREP_WRITE_EXEC){
-        esp_log_buffer_hex(GATTS_TAG, prepare_write_env->prepare_buf, prepare_write_env->prepare_len);
-    }else{
-        ESP_LOGI(GATTS_TAG,"ESP_GATT_PREP_WRITE_CANCEL");
-    }
-    if (prepare_write_env->prepare_buf) {
-        free(prepare_write_env->prepare_buf);
-        prepare_write_env->prepare_buf = NULL;
-    }
-    prepare_write_env->prepare_len = 0;
-}
-
 static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     switch (event) {
     case ESP_GATTS_REG_EVT:
@@ -476,20 +461,6 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         adv_config_done |= scan_rsp_config_flag;
         esp_ble_gatts_create_service(gatts_if, &gl_profile_tab[TRIGGER_APP_ID].service_id, GATTS_NUM_HANDLE_TEST_A);
         break;
-    case ESP_GATTS_READ_EVT: {
-        ESP_LOGI(GATTS_TAG, "GATT_READ_EVT, conn_id %d, trans_id %d, handle %d", param->read.conn_id, param->read.trans_id, param->read.handle);
-        esp_gatt_rsp_t rsp;
-        memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
-        rsp.attr_value.handle = param->read.handle;
-        rsp.attr_value.len = 4;
-        rsp.attr_value.value[0] = 0xde;
-        rsp.attr_value.value[1] = 0xed;
-        rsp.attr_value.value[2] = 0xbe;
-        rsp.attr_value.value[3] = 0xef;
-        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
-                                    ESP_GATT_OK, &rsp);
-        break;
-    }
     case ESP_GATTS_WRITE_EVT: {
         ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d", param->write.conn_id, param->write.trans_id, param->write.handle);
         if (!param->write.is_prep){
@@ -540,6 +511,11 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                 if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0 && wake_up_handled == 0) {
                     wake_up_handled = 1;
                     ESP_LOGE(GATTS_TAG, "TRIGGERED FROM WRITE EVENT HANDLER");
+                    if (button_handler_task_handle) {
+                        ESP_LOGE(GATTS_TAG, "Stopping button handler task");
+                        vTaskDelete(button_handler_task_handle);
+                        button_handler_task_handle = NULL;
+                    }
                     trigger_action();
                 }
 
@@ -548,15 +524,8 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         example_write_event_env(gatts_if, &trigger_prepare_write_env, param);
         break;
     }
-    case ESP_GATTS_EXEC_WRITE_EVT:
-        ESP_LOGI(GATTS_TAG,"ESP_GATTS_EXEC_WRITE_EVT");
-        esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
-        example_exec_write_event_env(&trigger_prepare_write_env, param);
-        break;
     case ESP_GATTS_MTU_EVT:
         ESP_LOGI(GATTS_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
-        break;
-    case ESP_GATTS_UNREG_EVT:
         break;
     case ESP_GATTS_CREATE_EVT:
         ESP_LOGI(GATTS_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d", param->create.status, param->create.service_handle);
@@ -635,6 +604,9 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
             esp_log_buffer_hex(GATTS_TAG, param->conf.value, param->conf.len);
         }
         break;
+    case ESP_GATTS_EXEC_WRITE_EVT:
+    case ESP_GATTS_READ_EVT:
+    case ESP_GATTS_UNREG_EVT:
     case ESP_GATTS_STOP_EVT:
     case ESP_GATTS_DELETE_EVT:
     case ESP_GATTS_OPEN_EVT:
@@ -659,20 +631,6 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
 
         esp_ble_gatts_create_service(gatts_if, &gl_profile_tab[IDLE_APP_ID].service_id, GATTS_NUM_HANDLE_TEST_B);
         break;
-    case ESP_GATTS_READ_EVT: {
-        ESP_LOGI(GATTS_TAG, "GATT_READ_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
-        esp_gatt_rsp_t rsp;
-        memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
-        rsp.attr_value.handle = param->read.handle;
-        rsp.attr_value.len = 4;
-        rsp.attr_value.value[0] = 0xde;
-        rsp.attr_value.value[1] = 0xed;
-        rsp.attr_value.value[2] = 0xbe;
-        rsp.attr_value.value[3] = 0xef;
-        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
-                                    ESP_GATT_OK, &rsp);
-        break;
-    }
     case ESP_GATTS_WRITE_EVT: {
         ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
         if (!param->write.is_prep){
@@ -686,15 +644,8 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
         example_write_event_env(gatts_if, &idle_prepare_write_env, param);
         break;
     }
-    case ESP_GATTS_EXEC_WRITE_EVT:
-        ESP_LOGI(GATTS_TAG,"ESP_GATTS_EXEC_WRITE_EVT");
-        esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
-        example_exec_write_event_env(&idle_prepare_write_env, param);
-        break;
     case ESP_GATTS_MTU_EVT:
         ESP_LOGI(GATTS_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
-        break;
-    case ESP_GATTS_UNREG_EVT:
         break;
     case ESP_GATTS_CREATE_EVT:
         ESP_LOGI(GATTS_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
@@ -712,8 +663,6 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
             ESP_LOGE(GATTS_TAG, "add char failed, error code =%x",add_char_ret);
         }
         break;
-    case ESP_GATTS_ADD_INCL_SRVC_EVT:
-        break;
     case ESP_GATTS_ADD_CHAR_EVT:
         ESP_LOGI(GATTS_TAG, "ADD_CHAR_EVT, status %d,  attr_handle %d, service_handle %d\n",
                  param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
@@ -730,13 +679,9 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
         ESP_LOGI(GATTS_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d\n",
                  param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
         break;
-    case ESP_GATTS_DELETE_EVT:
-        break;
     case ESP_GATTS_START_EVT:
         ESP_LOGI(GATTS_TAG, "SERVICE_START_EVT, status %d, service_handle %d\n",
                  param->start.status, param->start.service_handle);
-        break;
-    case ESP_GATTS_STOP_EVT:
         break;
     case ESP_GATTS_CONNECT_EVT:
         ESP_LOGI(GATTS_TAG, "CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:",
@@ -750,7 +695,13 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
         if (param->conf.status != ESP_GATT_OK){
             esp_log_buffer_hex(GATTS_TAG, param->conf.value, param->conf.len);
         }
-    break;
+        break;
+    case ESP_GATTS_EXEC_WRITE_EVT:
+    case ESP_GATTS_UNREG_EVT:
+    case ESP_GATTS_ADD_INCL_SRVC_EVT:
+    case ESP_GATTS_READ_EVT:
+    case ESP_GATTS_STOP_EVT:
+    case ESP_GATTS_DELETE_EVT:
     case ESP_GATTS_DISCONNECT_EVT:
     case ESP_GATTS_OPEN_EVT:
     case ESP_GATTS_CANCEL_OPEN_EVT:

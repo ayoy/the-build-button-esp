@@ -40,10 +40,14 @@
 #include "esp_bt_main.h"
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
+#include "driver/rtc_io.h"
 
 #include "sdkconfig.h"
 
 #define GATTS_TAG "GATTS_DEMO"
+
+void update_idle_flag(uint16_t value);
+
 
 ///Declare the static function
 static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
@@ -192,8 +196,9 @@ uint8_t is_idle = 0;
 #define LED_GPIO (26)
 #define LED_FADE_TIME (3000)
 #define LED_DUTY_MAX (2047)
-#define LED_DUTY_MIN (100)
+#define LED_DUTY_MIN (0)
 TaskHandle_t pwm_task_handle = NULL;
+uint8_t wake_up_handled = 0;
 
 #include "driver/ledc.h"
 
@@ -247,6 +252,26 @@ void pwm_task(void *pvParameter)
     }
 }
 
+void trigger_action()
+{
+    xTaskCreate(&pwm_task, "LED_PWM_task", 3072, NULL, 5, &pwm_task_handle);
+
+    ESP_LOGI(GATTS_TAG, "notifying :)");
+
+    uint8_t notify_data[15];
+    for (int i = 0; i < sizeof(notify_data); ++i)
+    {
+        notify_data[i] = i%0xff;
+    }
+    //the size of notify_data[] need less than MTU size
+    esp_ble_gatts_send_indicate(gl_profile_tab[TRIGGER_APP_ID].gatts_if,
+        gl_profile_tab[TRIGGER_APP_ID].conn_id,
+        gl_profile_tab[TRIGGER_APP_ID].char_handle,
+        sizeof(notify_data), notify_data, false);
+
+    update_idle_flag(0);
+}
+
 void button_handler_task(void *pvParameter)
 {
     ESP_LOGI(GATTS_TAG, "Starting button handler task");
@@ -272,22 +297,8 @@ void button_handler_task(void *pvParameter)
             if (level == 0) {
                 ESP_LOGI(GATTS_TAG, "Pin %i low!", BUTTON_GPIO);
                 if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
-                    xTaskCreate(&pwm_task, "LED_PWM_task", 3072, NULL, 5, &pwm_task_handle);
-
-                    ESP_LOGI(GATTS_TAG, "notifying :)");
-
-                    uint8_t notify_data[15];
-                    for (int i = 0; i < sizeof(notify_data); ++i)
-                    {
-                        notify_data[i] = i%0xff;
-                    }
-                    //the size of notify_data[] need less than MTU size
-                    esp_ble_gatts_send_indicate(gl_profile_tab[TRIGGER_APP_ID].gatts_if,
-                        gl_profile_tab[TRIGGER_APP_ID].conn_id,
-                        gl_profile_tab[TRIGGER_APP_ID].char_handle,
-                        sizeof(notify_data), notify_data, false);
-
-                    is_idle = 0;
+                    ESP_LOGE(GATTS_TAG, "TRIGGERED FROM BUTTON HANDLER TASK");
+                    trigger_action();
                     vTaskDelete(NULL);
                 }
             }
@@ -296,12 +307,42 @@ void button_handler_task(void *pvParameter)
     }
 }
 
+TaskHandle_t deep_sleep_task_handle = NULL;
+TaskHandle_t button_handler_task_handle = NULL;
+
+void deep_sleep_task(void *pvParameter)
+{
+    ESP_LOGE(GATTS_TAG, "Starting deep sleep task");
+    vTaskDelay(20 * 1000 / portTICK_PERIOD_MS);
+
+    esp_sleep_enable_ext0_wakeup(BUTTON_GPIO, 0);
+    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
+    // esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF);
+
+    if (button_handler_task_handle) {
+        vTaskDelete(button_handler_task_handle);
+        button_handler_task_handle = NULL;
+    }
+
+    esp_bluedroid_disable();
+    esp_bt_controller_disable();
+    ESP_LOGE(GATTS_TAG, "Entering deep sleep");
+    esp_deep_sleep_start();
+}
+
 void update_idle_flag(uint16_t value) 
 {
     if (is_idle != value) {
         is_idle = value;
         if (is_idle) {
-            xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
+            xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, &button_handler_task_handle);
+            xTaskCreate(&deep_sleep_task, "deep_sleep_task", 3072, NULL, 5, &deep_sleep_task_handle);
+        } else {
+            if (deep_sleep_task_handle) {
+                ESP_LOGE(GATTS_TAG, "Canceling deep sleep task");
+                vTaskDelete(deep_sleep_task_handle);
+                deep_sleep_task_handle = NULL;
+            }
         }
     }
 }
@@ -495,6 +536,11 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                 }else{
                     ESP_LOGE(GATTS_TAG, "unknown descr value");
                     esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
+                }
+                if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0 && wake_up_handled == 0) {
+                    wake_up_handled = 1;
+                    ESP_LOGE(GATTS_TAG, "TRIGGERED FROM WRITE EVENT HANDLER");
+                    trigger_action();
                 }
 
             }
@@ -748,7 +794,9 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 
 void app_main()
 {
-    esp_wifi_set_mode(WIFI_MODE_NULL);
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
+        rtc_gpio_deinit(BUTTON_GPIO);
+    }
 
     esp_err_t ret;
 

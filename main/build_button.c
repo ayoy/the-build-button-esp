@@ -30,6 +30,7 @@
 #include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_log.h"
+#include "client_id.h"
 #include "nvs_flash.h"
 #include "esp_wifi.h"
 #include "esp_bt.h"
@@ -189,6 +190,9 @@ static prepare_type_env_t idle_prepare_write_env;
 
 void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
+int client_id_set = 0;
+uint8_t client_id[128];
+size_t client_id_length = 0;
 uint8_t is_idle = 0;
 #define BUTTON_GPIO (25)
 #define LED_GPIO (26)
@@ -257,15 +261,18 @@ void trigger_action()
     ESP_LOGI(GATTS_TAG, "notifying :)");
 
     uint8_t notify_data[15];
-    for (int i = 0; i < sizeof(notify_data); ++i)
-    {
+    for (int i = 0; i < sizeof(notify_data); ++i) {
         notify_data[i] = i%0xff;
     }
-    //the size of notify_data[] need less than MTU size
-    esp_ble_gatts_send_indicate(gl_profile_tab[TRIGGER_APP_ID].gatts_if,
-        gl_profile_tab[TRIGGER_APP_ID].conn_id,
-        gl_profile_tab[TRIGGER_APP_ID].char_handle,
-        sizeof(notify_data), notify_data, false);
+
+    if (gl_profile_tab[TRIGGER_APP_ID].gatts_if == ESP_GATT_IF_NONE) {
+        ESP_LOGE(GATTS_TAG, "GATTS interface is not set");
+    } else {
+        esp_ble_gatts_send_indicate(gl_profile_tab[TRIGGER_APP_ID].gatts_if,
+            gl_profile_tab[TRIGGER_APP_ID].conn_id,
+            gl_profile_tab[TRIGGER_APP_ID].char_handle,
+            sizeof(notify_data), notify_data, false);
+    }
 
     update_idle_flag(0);
 }
@@ -489,6 +496,17 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                 if (descr_value == 0x0001){
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY){
                         ESP_LOGI(GATTS_TAG, "notify enable");
+
+                        if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 && wake_up_handled == 0) {
+                            wake_up_handled = 1;
+                            ESP_LOGE(GATTS_TAG, "TRIGGERED FROM WRITE EVENT (NOTIFICATION ENABLE) HANDLER");
+                            if (button_handler_task_handle) {
+                                ESP_LOGE(GATTS_TAG, "Stopping button handler task");
+                                vTaskDelete(button_handler_task_handle);
+                                button_handler_task_handle = NULL;
+                            }
+                            trigger_action();
+                        }
                         // uint8_t notify_data[15];
                         // for (int i = 0; i < sizeof(notify_data); ++i)
                         // {
@@ -518,17 +536,6 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                     ESP_LOGE(GATTS_TAG, "unknown descr value");
                     esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
                 }
-                if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 && wake_up_handled == 0) {
-                    wake_up_handled = 1;
-                    ESP_LOGE(GATTS_TAG, "TRIGGERED FROM WRITE EVENT HANDLER");
-                    if (button_handler_task_handle) {
-                        ESP_LOGE(GATTS_TAG, "Stopping button handler task");
-                        vTaskDelete(button_handler_task_handle);
-                        button_handler_task_handle = NULL;
-                    }
-                    trigger_action();
-                }
-
             }
         }
         example_write_event_env(gatts_if, &trigger_prepare_write_env, param);
@@ -606,6 +613,7 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
     }
     case ESP_GATTS_DISCONNECT_EVT:
         ESP_LOGI(GATTS_TAG, "ESP_GATTS_DISCONNECT_EVT");
+        update_idle_flag(1);
         esp_ble_gap_start_advertising(&adv_params);
         break;
     case ESP_GATTS_CONF_EVT:
@@ -646,10 +654,23 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
         if (!param->write.is_prep){
             ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value:", param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
-            if (param->write.len == 1) {
-                update_idle_flag(param->write.value[0]);
+
+            size_t id_length = param->write.len-2;
+            if (param->write.len < 3 || param->write.value[id_length] != ':') {
+                ESP_LOGE(GATTS_TAG, "Idle characteristic payload formatted incorrectly");
+            } else {
+                int id_length_unchanged = client_id_length == id_length;
+                if (client_id_set && id_length_unchanged &&
+                    client_id_compare(client_id, param->write.value, client_id_length)) 
+                {
+                    ESP_LOGE(GATTS_TAG, "Known client, setting idle flag");
+                } else {
+                    ESP_LOGE(GATTS_TAG, "Unknown client, storing new Client ID");
+                    write_client_id_to_nvs(param->write.value, id_length);
+                }
+                uint8_t idle = param->write.value[param->write.len-1];
+                update_idle_flag(idle);
             }
-            //TODO: response?
         }
         example_write_event_env(gatts_if, &idle_prepare_write_env, param);
         break;
@@ -752,22 +773,27 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
-
 void app_main()
 {
+    esp_err_t ret;
+
+    // Initialize NVS.
+    ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK( ret );
+
+    fetch_client_id_from_nvs(client_id, &client_id_length);
+    esp_log_buffer_hex(GATTS_TAG, client_id, client_id_length);
+    client_id_set = client_id_length > 0;
+
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
+        wake_up_handled = client_id_set == 0;
+
         ESP_LOGE(GATTS_TAG, "WAKE UP CAUSE: DEEP SLEEP INTERRUPT");
         // rtc_gpio_deinit(BUTTON_GPIO);
-
-        esp_err_t ret;
-
-        // Initialize NVS.
-        ret = nvs_flash_init();
-        if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
-            ESP_ERROR_CHECK(nvs_flash_erase());
-            ret = nvs_flash_init();
-        }
-        ESP_ERROR_CHECK( ret );
 
         esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
         ret = esp_bt_controller_init(&bt_cfg);

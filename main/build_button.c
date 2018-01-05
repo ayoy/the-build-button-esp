@@ -197,7 +197,7 @@ uint8_t is_idle = 0;
 #define BUTTON_GPIO (25)
 #define LED_GPIO (26)
 #define LED_FADE_TIME (3000)
-#define LED_DUTY_MAX (2047)
+#define LED_DUTY_MAX (8191)
 #define LED_DUTY_MIN (0)
 TaskHandle_t pwm_task_handle = NULL;
 uint8_t wake_up_handled = 0;
@@ -216,6 +216,11 @@ void pwm_task(void *pvParameter)
 {
     ESP_LOGI(GATTS_TAG, "Starting LED PWM task");
 
+    gpio_pad_select_gpio(LED_GPIO);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(LED_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(LED_GPIO, GPIO_PULLDOWN_ONLY);
+
     ledc_timer_config_t ledc_timer = {
         .duty_resolution = LEDC_TIMER_13_BIT, // resolution of PWM duty
         .freq_hz = 5000,                      // frequency of PWM signal
@@ -232,7 +237,6 @@ void pwm_task(void *pvParameter)
         .timer_sel = LEDC_TIMER_0,
     };
 
-    // esp_err_t ret;
     ledc_timer_config(&ledc_timer);
     ledc_channel_config(&ledc_config);
     ledc_fade_func_install(0);
@@ -241,9 +245,6 @@ void pwm_task(void *pvParameter)
         ESP_LOGI(GATTS_TAG, "1. LEDC fade up to duty = %d\n", LED_DUTY_MAX);
         ledc_set_fade_with_time(ledc_config.speed_mode, ledc_config.channel, LED_DUTY_MAX, LED_FADE_TIME/2);
         ledc_fade_start(ledc_config.speed_mode, ledc_config.channel, LEDC_FADE_WAIT_DONE);
-        if (is_idle) {
-            tear_down_pwm_task(&ledc_config);
-        }
 
         ESP_LOGI(GATTS_TAG, "2. LEDC fade down to duty = %d\n", LED_DUTY_MIN);
         ledc_set_fade_with_time(ledc_config.speed_mode, ledc_config.channel, LED_DUTY_MIN, LED_FADE_TIME/2);

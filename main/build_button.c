@@ -241,17 +241,22 @@ void pwm_task(void *pvParameter)
     ledc_channel_config(&ledc_config);
     ledc_fade_func_install(0);
 
-    while (1) {
-        ESP_LOGI(GATTS_TAG, "1. LEDC fade up to duty = %d\n", LED_DUTY_MAX);
-        ledc_set_fade_with_time(ledc_config.speed_mode, ledc_config.channel, LED_DUTY_MAX, LED_FADE_TIME/2);
-        ledc_fade_start(ledc_config.speed_mode, ledc_config.channel, LEDC_FADE_WAIT_DONE);
+    ledc_set_duty(ledc_config.speed_mode, ledc_config.channel, 8191);
+    ledc_update_duty(ledc_config.speed_mode, ledc_config.channel);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
 
-        ESP_LOGI(GATTS_TAG, "2. LEDC fade down to duty = %d\n", LED_DUTY_MIN);
+    while (1) {
+        ESP_LOGI(GATTS_TAG, "1. LEDC fade down to duty = %d", LED_DUTY_MIN);
         ledc_set_fade_with_time(ledc_config.speed_mode, ledc_config.channel, LED_DUTY_MIN, LED_FADE_TIME/2);
         ledc_fade_start(ledc_config.speed_mode, ledc_config.channel, LEDC_FADE_WAIT_DONE);
+
         if (is_idle) {
             tear_down_pwm_task(&ledc_config);
         }
+
+        ESP_LOGI(GATTS_TAG, "2. LEDC fade up to duty = %d", LED_DUTY_MAX);
+        ledc_set_fade_with_time(ledc_config.speed_mode, ledc_config.channel, LED_DUTY_MAX, LED_FADE_TIME/2);
+        ledc_fade_start(ledc_config.speed_mode, ledc_config.channel, LEDC_FADE_WAIT_DONE);
     }
 }
 
@@ -298,11 +303,13 @@ void button_handler_task(void *pvParameter)
             level = gpio_get_level(BUTTON_GPIO);
             if (level == 0) {
                 ESP_LOGI(GATTS_TAG, "Pin %i low!", BUTTON_GPIO);
-                if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
-                    ESP_LOGE(GATTS_TAG, "TRIGGERED FROM BUTTON HANDLER TASK");
-                    trigger_action();
-                    ESP_LOGE(GATTS_TAG, "Stopping button handler task");
-                    vTaskDelete(NULL);
+                if (is_idle) {
+                    if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
+                        ESP_LOGE(GATTS_TAG, "TRIGGERED FROM BUTTON HANDLER TASK");
+                        trigger_action();
+                    }
+                } else {
+                    update_idle_flag(1);
                 }
             }
         }
@@ -316,6 +323,7 @@ TaskHandle_t button_handler_task_handle = NULL;
 void enter_deep_sleep()
 {
     if (button_handler_task_handle) {
+        ESP_LOGE(GATTS_TAG, "Stopping button handler task");
         vTaskDelete(button_handler_task_handle);
         button_handler_task_handle = NULL;
     }
@@ -347,8 +355,11 @@ void update_idle_flag(uint16_t value)
     if (is_idle != value) {
         is_idle = value;
         if (is_idle) {
-            xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, &button_handler_task_handle);
+            if (!button_handler_task_handle) {
+                xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, &button_handler_task_handle);
+            }
             xTaskCreate(&deep_sleep_task, "deep_sleep_task", 3072, NULL, 5, &deep_sleep_task_handle);
+            esp_ble_gap_start_advertising(&adv_params);
         } else {
             if (deep_sleep_task_handle) {
                 ESP_LOGE(GATTS_TAG, "Canceling deep sleep task");
@@ -490,18 +501,13 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
             if (gl_profile_tab[TRIGGER_APP_ID].descr_handle == param->write.handle && param->write.len == 2){
                 uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
-                if (descr_value == 0x0001){
+                if (descr_value == 0x0001) {
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY){
                         ESP_LOGI(GATTS_TAG, "notify enable");
 
                         if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 && wake_up_handled == 0) {
                             wake_up_handled = 1;
                             ESP_LOGE(GATTS_TAG, "TRIGGERED FROM WRITE EVENT (NOTIFICATION ENABLE) HANDLER");
-                            if (button_handler_task_handle) {
-                                ESP_LOGE(GATTS_TAG, "Stopping button handler task");
-                                vTaskDelete(button_handler_task_handle);
-                                button_handler_task_handle = NULL;
-                            }
                             trigger_action();
                         }
                         // uint8_t notify_data[15];
@@ -611,7 +617,6 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
     case ESP_GATTS_DISCONNECT_EVT:
         ESP_LOGI(GATTS_TAG, "ESP_GATTS_DISCONNECT_EVT");
         update_idle_flag(1);
-        esp_ble_gap_start_advertising(&adv_params);
         break;
     case ESP_GATTS_CONF_EVT:
         ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONF_EVT, status %d", param->conf.status);

@@ -261,21 +261,17 @@ void trigger_action()
 
     ESP_LOGI(GATTS_TAG, "notifying :)");
 
-    uint8_t notify_data[15];
-    for (int i = 0; i < sizeof(notify_data); ++i) {
-        notify_data[i] = i%0xff;
-    }
-
     if (gl_profile_tab[TRIGGER_APP_ID].gatts_if == ESP_GATT_IF_NONE) {
         ESP_LOGE(GATTS_TAG, "GATTS interface is not set");
-    } else {
+    } else if (client_id_set > 0) {
+        vTaskDelay(500 / portTICK_PERIOD_MS);        
+        ESP_LOGI(GATTS_TAG, "sending notification event");
         esp_ble_gatts_send_indicate(gl_profile_tab[TRIGGER_APP_ID].gatts_if,
             gl_profile_tab[TRIGGER_APP_ID].conn_id,
             gl_profile_tab[TRIGGER_APP_ID].char_handle,
-            sizeof(notify_data), notify_data, false);
+            client_id_length, client_id, false);
+        update_idle_flag(0);
     }
-
-    update_idle_flag(0);
 }
 
 void button_handler_task(void *pvParameter)
@@ -668,6 +664,8 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
                 } else {
                     ESP_LOGE(GATTS_TAG, "Unknown client, storing new Client ID");
                     write_client_id_to_nvs(param->write.value, id_length);
+                    fetch_client_id_from_nvs(client_id, &client_id_length);
+                    client_id_set = client_id_length > 0;
                 }
                 uint8_t idle = param->write.value[param->write.len-1];
                 update_idle_flag(idle);

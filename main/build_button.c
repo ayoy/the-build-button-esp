@@ -219,14 +219,7 @@ void button_handler_task(void *pvParameter)
 {
     ESP_LOGE(GATTS_TAG, "Starting button handler task");
 
-    /* Configure the IOMUX register for pad BUTTON_GPIO (some pads are
-       muxed to GPIO on reset already, but some default to other
-       functions and need to be switched to GPIO. Consult the
-       Technical Reference for a list of pads and their default
-       functions.)
-    */
     gpio_pad_select_gpio(BUTTON_GPIO);
-    /* Set the GPIO as a push/pull output */
     gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
     gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
 

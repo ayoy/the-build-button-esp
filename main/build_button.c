@@ -255,16 +255,9 @@ void button_handler_task(void *pvParameter)
 }
 
 TaskHandle_t deep_sleep_task_handle = NULL;
-TaskHandle_t button_handler_task_handle = NULL;
 
 void enter_deep_sleep()
 {
-    if (button_handler_task_handle) {
-        ESP_LOGE(GATTS_TAG, "Stopping button handler task");
-        vTaskDelete(button_handler_task_handle);
-        button_handler_task_handle = NULL;
-    }
-
     const uint64_t ext_wakeup_pin_mask = 1ULL << BUTTON_GPIO;
     esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_mask, ESP_EXT1_WAKEUP_ALL_LOW);
 
@@ -295,9 +288,6 @@ void update_idle_flag(uint8_t value)
         is_idle = value;
         if (is_idle) {
             set_led_pwm_enabled(0);
-            if (!button_handler_task_handle) {
-                xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, &button_handler_task_handle);
-            }
             xTaskCreate(&deep_sleep_task, "deep_sleep_task", 3072, NULL, 5, &deep_sleep_task_handle);
             esp_ble_gap_start_advertising(&adv_params);
         } else {
@@ -738,6 +728,9 @@ void app_main()
         wake_up_handled = client_id_set == 0;
 
         ESP_LOGE(GATTS_TAG, "WAKE UP CAUSE: DEEP SLEEP INTERRUPT");
+
+        xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
+
         // rtc_gpio_deinit(BUTTON_GPIO);
 
         esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();

@@ -297,6 +297,7 @@ void update_idle_flag(uint8_t value)
                 vTaskDelete(deep_sleep_task_handle);
                 deep_sleep_task_handle = NULL;
             }
+            esp_ble_gap_stop_advertising();
         }
     }
 }
@@ -730,8 +731,6 @@ void app_main()
         ESP_LOGE(GATTS_TAG, "WAKE UP CAUSE: DEEP SLEEP INTERRUPT");
 
         xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
-
-        // rtc_gpio_deinit(BUTTON_GPIO);
 
         esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
         ret = esp_bt_controller_init(&bt_cfg);

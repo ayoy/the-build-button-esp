@@ -23,32 +23,26 @@
 
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "esp_wifi.h"
 #include "esp_bt.h"
 
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 #include "esp_bt_defs.h"
 #include "esp_bt_main.h"
-#include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
-#include "driver/rtc_io.h"
-#include "soc/rtc_cntl_reg.h"
 
 #include "sdkconfig.h"
 
 #include "client_id.h"
 #include "led_pwm.h"
 
-#define GATTS_TAG "GATTS_DEMO"
+#define BUILDBUTTON_TAG "BUILD_BUTTON"
 
 void update_idle_flag(uint8_t value);
 
@@ -201,12 +195,12 @@ uint8_t wake_up_handled = 0;
 
 void trigger_action()
 {
-    ESP_LOGI(GATTS_TAG, "notifying :)");
+    ESP_LOGI(BUILDBUTTON_TAG, "notifying :)");
 
     if (gl_profile_tab[TRIGGER_APP_ID].gatts_if == ESP_GATT_IF_NONE) {
-        ESP_LOGE(GATTS_TAG, "GATTS interface is not set");
+        ESP_LOGE(BUILDBUTTON_TAG, "GATTS interface is not set");
     } else if (client_id_set > 0) {
-        ESP_LOGI(GATTS_TAG, "sending notification event");
+        ESP_LOGI(BUILDBUTTON_TAG, "sending notification event");
         esp_ble_gatts_send_indicate(gl_profile_tab[TRIGGER_APP_ID].gatts_if,
             gl_profile_tab[TRIGGER_APP_ID].conn_id,
             gl_profile_tab[TRIGGER_APP_ID].char_handle,
@@ -217,7 +211,7 @@ void trigger_action()
 
 void button_handler_task(void *pvParameter)
 {
-    ESP_LOGE(GATTS_TAG, "Starting button handler task");
+    ESP_LOGE(BUILDBUTTON_TAG, "Starting button handler task");
 
     gpio_pad_select_gpio(BUTTON_GPIO);
     gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
@@ -225,20 +219,20 @@ void button_handler_task(void *pvParameter)
 
     int level = gpio_get_level(BUTTON_GPIO);
     if (level == 0) {
-        ESP_LOGE(GATTS_TAG, "Pin %i low, but should be high -,-", BUTTON_GPIO);
+        ESP_LOGE(BUILDBUTTON_TAG, "Pin %i low, but should be high -,-", BUTTON_GPIO);
     }
     while(1) {
         if (gpio_get_level(BUTTON_GPIO) != level) {
             level = gpio_get_level(BUTTON_GPIO);
             if (level == 0) {
-                ESP_LOGI(GATTS_TAG, "Pin %i low!", BUTTON_GPIO);
+                ESP_LOGI(BUILDBUTTON_TAG, "Pin %i low!", BUTTON_GPIO);
                 if (is_idle) {
                     if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
-                        ESP_LOGE(GATTS_TAG, "TRIGGERED FROM BUTTON HANDLER TASK");
+                        ESP_LOGE(BUILDBUTTON_TAG, "TRIGGERED FROM BUTTON HANDLER TASK");
                         trigger_action();
                     }
                 } else {
-                    ESP_LOGE(GATTS_TAG, "INTERRUPTING CURRENT RUN ON USER REQUEST");
+                    ESP_LOGE(BUILDBUTTON_TAG, "INTERRUPTING CURRENT RUN ON USER REQUEST");
                     update_idle_flag(1);
                 }
             }
@@ -262,13 +256,13 @@ void enter_deep_sleep()
     }
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
-    ESP_LOGE(GATTS_TAG, "Entering deep sleep");
+    ESP_LOGE(BUILDBUTTON_TAG, "Entering deep sleep");
     esp_deep_sleep_start();
 }
 
 void deep_sleep_task(void *pvParameter)
 {
-    ESP_LOGE(GATTS_TAG, "Starting deep sleep task");
+    ESP_LOGE(BUILDBUTTON_TAG, "Starting deep sleep task");
     vTaskDelay(20 * 1000 / portTICK_PERIOD_MS);
     enter_deep_sleep();
 }
@@ -286,7 +280,7 @@ void update_idle_flag(uint8_t value)
         } else {
             set_led_pwm_enabled(1);
             if (deep_sleep_task_handle) {
-                ESP_LOGE(GATTS_TAG, "Canceling deep sleep task");
+                ESP_LOGE(BUILDBUTTON_TAG, "Canceling deep sleep task");
                 vTaskDelete(deep_sleep_task_handle);
                 deep_sleep_task_handle = NULL;
             }
@@ -315,19 +309,19 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
         //advertising start complete event to indicate advertising start successfully or failed
         if (param->adv_start_cmpl.status != ESP_BT_STATUS_SUCCESS) {
-            ESP_LOGE(GATTS_TAG, "Advertising start failed");
+            ESP_LOGE(BUILDBUTTON_TAG, "Advertising start failed");
         }
         break;
     case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
         if (param->adv_stop_cmpl.status != ESP_BT_STATUS_SUCCESS) {
-            ESP_LOGE(GATTS_TAG, "Advertising stop failed");
+            ESP_LOGE(BUILDBUTTON_TAG, "Advertising stop failed");
         }
         else {
-            ESP_LOGI(GATTS_TAG, "Stop adv successfully");
+            ESP_LOGI(BUILDBUTTON_TAG, "Stop adv successfully");
         }
         break;
     case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
-         ESP_LOGI(GATTS_TAG, "update connetion params status = %d, min_int = %d, max_int = %d,conn_int = %d,latency = %d, timeout = %d",
+         ESP_LOGI(BUILDBUTTON_TAG, "update connetion params status = %d, min_int = %d, max_int = %d,conn_int = %d,latency = %d, timeout = %d",
                   param->update_conn_params.status,
                   param->update_conn_params.min_int,
                   param->update_conn_params.max_int,
@@ -348,7 +342,7 @@ void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare
                 prepare_write_env->prepare_buf = (uint8_t *)malloc(PREPARE_BUF_MAX_SIZE*sizeof(uint8_t));
                 prepare_write_env->prepare_len = 0;
                 if (prepare_write_env->prepare_buf == NULL) {
-                    ESP_LOGE(GATTS_TAG, "Gatt_server prep no mem");
+                    ESP_LOGE(BUILDBUTTON_TAG, "Gatt_server prep no mem");
                     status = ESP_GATT_NO_RESOURCES;
                 }
             } else {
@@ -367,7 +361,7 @@ void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare
             memcpy(gatt_rsp->attr_value.value, param->write.value, param->write.len);
             esp_err_t response_err = esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, status, gatt_rsp);
             if (response_err != ESP_OK){
-               ESP_LOGE(GATTS_TAG, "Send response error");
+               ESP_LOGE(BUILDBUTTON_TAG, "Send response error");
             }
             free(gatt_rsp);
             if (status != ESP_GATT_OK){
@@ -387,7 +381,7 @@ void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare
 static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     switch (event) {
     case ESP_GATTS_REG_EVT:
-        ESP_LOGI(GATTS_TAG, "REGISTER_APP_EVT, status %d, app_id %d", param->reg.status, param->reg.app_id);
+        ESP_LOGI(BUILDBUTTON_TAG, "REGISTER_APP_EVT, status %d, app_id %d", param->reg.status, param->reg.app_id);
         gl_profile_tab[TRIGGER_APP_ID].service_id.is_primary = true;
         gl_profile_tab[TRIGGER_APP_ID].service_id.id.inst_id = 0x00;
         gl_profile_tab[TRIGGER_APP_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
@@ -395,26 +389,26 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
 
         esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(TEST_DEVICE_NAME);
         if (set_dev_name_ret){
-            ESP_LOGE(GATTS_TAG, "set device name failed, error code = %x", set_dev_name_ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "set device name failed, error code = %x", set_dev_name_ret);
         }
         //config adv data
         esp_err_t ret = esp_ble_gap_config_adv_data(&adv_data);
         if (ret){
-            ESP_LOGE(GATTS_TAG, "config adv data failed, error code = %x", ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "config adv data failed, error code = %x", ret);
         }
         adv_config_done |= adv_config_flag;
         //config scan response data
         ret = esp_ble_gap_config_adv_data(&scan_rsp_data);
         if (ret){
-            ESP_LOGE(GATTS_TAG, "config scan response data failed, error code = %x", ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "config scan response data failed, error code = %x", ret);
         }
         adv_config_done |= scan_rsp_config_flag;
         esp_ble_gatts_create_service(gatts_if, &gl_profile_tab[TRIGGER_APP_ID].service_id, GATTS_NUM_HANDLE_TEST_A);
         break;
     case ESP_GATTS_WRITE_EVT: {
-        ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d", param->write.conn_id, param->write.trans_id, param->write.handle);
+        ESP_LOGI(BUILDBUTTON_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d", param->write.conn_id, param->write.trans_id, param->write.handle);
         if (!param->write.is_prep){
-            ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d", param->write.len);
+            ESP_LOGI(BUILDBUTTON_TAG, "GATT_WRITE_EVT, value len %d", param->write.len);
             char buf[128], *pos = buf; 
             for (int i=0; i != param->write.len; i++) {
                 if (i) {
@@ -422,17 +416,17 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                 }
                 pos += sprintf(pos, "%d", param->write.value[i]);
             }
-            ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value: %s", buf);
-            esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
+            ESP_LOGI(BUILDBUTTON_TAG, "GATT_WRITE_EVT, value: %s", buf);
+            esp_log_buffer_hex(BUILDBUTTON_TAG, param->write.value, param->write.len);
             if (gl_profile_tab[TRIGGER_APP_ID].descr_handle == param->write.handle && param->write.len == 2){
                 uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
                 if (descr_value == 0x0001) {
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY){
-                        ESP_LOGI(GATTS_TAG, "notify enable");
+                        ESP_LOGI(BUILDBUTTON_TAG, "notify enable");
 
                         if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 && wake_up_handled == 0) {
                             wake_up_handled = 1;
-                            ESP_LOGE(GATTS_TAG, "TRIGGERED FROM WRITE EVENT (NOTIFICATION ENABLE) HANDLER");
+                            ESP_LOGE(BUILDBUTTON_TAG, "TRIGGERED FROM WRITE EVENT (NOTIFICATION ENABLE) HANDLER");
                             trigger_action();
                         }
                         // uint8_t notify_data[15];
@@ -441,13 +435,13 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                         //     notify_data[i] = i%0xff;
                         // }
                         // //the size of notify_data[] need less than MTU size
-                        // ESP_LOGI(GATTS_TAG, "current_gatts_if: %d, current_conn_id: %d", gatts_if, param->write.conn_id);
+                        // ESP_LOGI(BUILDBUTTON_TAG, "current_gatts_if: %d, current_conn_id: %d", gatts_if, param->write.conn_id);
                         // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[TRIGGER_APP_ID].char_handle,
                         //                         sizeof(notify_data), notify_data, false);
                     }
                 }else if (descr_value == 0x0002){
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_INDICATE){
-                        ESP_LOGI(GATTS_TAG, "indicate enable");
+                        ESP_LOGI(BUILDBUTTON_TAG, "indicate enable");
                         // uint8_t indicate_data[15];
                         // for (int i = 0; i < sizeof(indicate_data); ++i)
                         // {
@@ -459,10 +453,10 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                     }
                 }
                 else if (descr_value == 0x0000){
-                    ESP_LOGI(GATTS_TAG, "notify/indicate disable ");
+                    ESP_LOGI(BUILDBUTTON_TAG, "notify/indicate disable ");
                 }else{
-                    ESP_LOGE(GATTS_TAG, "unknown descr value");
-                    esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
+                    ESP_LOGE(BUILDBUTTON_TAG, "unknown descr value");
+                    esp_log_buffer_hex(BUILDBUTTON_TAG, param->write.value, param->write.len);
                 }
             }
         }
@@ -470,10 +464,10 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         break;
     }
     case ESP_GATTS_MTU_EVT:
-        ESP_LOGI(GATTS_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
+        ESP_LOGI(BUILDBUTTON_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
         break;
     case ESP_GATTS_CREATE_EVT:
-        ESP_LOGI(GATTS_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d", param->create.status, param->create.service_handle);
+        ESP_LOGI(BUILDBUTTON_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d", param->create.status, param->create.service_handle);
         gl_profile_tab[TRIGGER_APP_ID].service_handle = param->create.service_handle;
         gl_profile_tab[TRIGGER_APP_ID].char_uuid.len = ESP_UUID_LEN_16;
         gl_profile_tab[TRIGGER_APP_ID].char_uuid.uuid.uuid16 = GATTS_CHAR_UUID_TEST_A;
@@ -485,41 +479,41 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                                                         a_property,
                                                         &gatts_demo_char1_val, NULL);
         if (add_char_ret){
-            ESP_LOGE(GATTS_TAG, "add char failed, error code =%x",add_char_ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "add char failed, error code =%x",add_char_ret);
         }
         break;
     case ESP_GATTS_ADD_CHAR_EVT: {
         uint16_t length = 0;
         const uint8_t *prf_char;
 
-        ESP_LOGI(GATTS_TAG, "ADD_CHAR_EVT, status %d,  attr_handle %d, service_handle %d",
+        ESP_LOGI(BUILDBUTTON_TAG, "ADD_CHAR_EVT, status %d,  attr_handle %d, service_handle %d",
                 param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
         gl_profile_tab[TRIGGER_APP_ID].char_handle = param->add_char.attr_handle;
         gl_profile_tab[TRIGGER_APP_ID].descr_uuid.len = ESP_UUID_LEN_16;
         gl_profile_tab[TRIGGER_APP_ID].descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
         esp_err_t get_attr_ret = esp_ble_gatts_get_attr_value(param->add_char.attr_handle,  &length, &prf_char);
         if (get_attr_ret == ESP_FAIL){
-            ESP_LOGE(GATTS_TAG, "ILLEGAL HANDLE");
+            ESP_LOGE(BUILDBUTTON_TAG, "ILLEGAL HANDLE");
         }
 
-        ESP_LOGI(GATTS_TAG, "the gatts demo char length = %x", length);
+        ESP_LOGI(BUILDBUTTON_TAG, "the gatts demo char length = %x", length);
         for(int i = 0; i < length; i++){
-            ESP_LOGI(GATTS_TAG, "prf_char[%x] =%x",i,prf_char[i]);
+            ESP_LOGI(BUILDBUTTON_TAG, "prf_char[%x] =%x",i,prf_char[i]);
         }
         esp_err_t add_descr_ret = esp_ble_gatts_add_char_descr(gl_profile_tab[TRIGGER_APP_ID].service_handle, &gl_profile_tab[TRIGGER_APP_ID].descr_uuid,
                                                                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, &gatts_demo_char_descr_val, NULL);
         if (add_descr_ret){
-            ESP_LOGE(GATTS_TAG, "add char descr failed, error code =%x", add_descr_ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "add char descr failed, error code =%x", add_descr_ret);
         }
         break;
     }
     case ESP_GATTS_ADD_CHAR_DESCR_EVT:
         gl_profile_tab[TRIGGER_APP_ID].descr_handle = param->add_char_descr.attr_handle;
-        ESP_LOGI(GATTS_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d",
+        ESP_LOGI(BUILDBUTTON_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d",
                  param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
         break;
     case ESP_GATTS_START_EVT:
-        ESP_LOGI(GATTS_TAG, "SERVICE_START_EVT, status %d, service_handle %d",
+        ESP_LOGI(BUILDBUTTON_TAG, "SERVICE_START_EVT, status %d, service_handle %d",
                  param->start.status, param->start.service_handle);
         break;
     case ESP_GATTS_CONNECT_EVT: {
@@ -530,7 +524,7 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         conn_params.max_int = 0x20;    // max_int = 0x20*1.25ms = 40ms
         conn_params.min_int = 0x10;    // min_int = 0x10*1.25ms = 20ms
         conn_params.timeout = 400;    // timeout = 400*10ms = 4000ms
-        ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:",
+        ESP_LOGI(BUILDBUTTON_TAG, "ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:",
                  param->connect.conn_id,
                  param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
                  param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
@@ -540,13 +534,13 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
-        ESP_LOGI(GATTS_TAG, "ESP_GATTS_DISCONNECT_EVT");
+        ESP_LOGI(BUILDBUTTON_TAG, "ESP_GATTS_DISCONNECT_EVT");
         update_idle_flag(1);
         break;
     case ESP_GATTS_CONF_EVT:
-        ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONF_EVT, status %d", param->conf.status);
+        ESP_LOGI(BUILDBUTTON_TAG, "ESP_GATTS_CONF_EVT, status %d", param->conf.status);
         if (param->conf.status != ESP_GATT_OK){
-            esp_log_buffer_hex(GATTS_TAG, param->conf.value, param->conf.len);
+            esp_log_buffer_hex(BUILDBUTTON_TAG, param->conf.value, param->conf.len);
         }
         break;
     case ESP_GATTS_EXEC_WRITE_EVT:
@@ -568,7 +562,7 @@ static void gatts_trigger_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
 static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     switch (event) {
     case ESP_GATTS_REG_EVT:
-        ESP_LOGI(GATTS_TAG, "REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
+        ESP_LOGI(BUILDBUTTON_TAG, "REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
         gl_profile_tab[IDLE_APP_ID].service_id.is_primary = true;
         gl_profile_tab[IDLE_APP_ID].service_id.id.inst_id = 0x00;
         gl_profile_tab[IDLE_APP_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
@@ -577,22 +571,22 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
         esp_ble_gatts_create_service(gatts_if, &gl_profile_tab[IDLE_APP_ID].service_id, GATTS_NUM_HANDLE_TEST_B);
         break;
     case ESP_GATTS_WRITE_EVT: {
-        ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
+        ESP_LOGI(BUILDBUTTON_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
         if (!param->write.is_prep){
-            ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value:", param->write.len);
-            esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
+            ESP_LOGI(BUILDBUTTON_TAG, "GATT_WRITE_EVT, value len %d, value:", param->write.len);
+            esp_log_buffer_hex(BUILDBUTTON_TAG, param->write.value, param->write.len);
 
             size_t id_length = param->write.len-2;
             if (param->write.len < 3 || param->write.value[id_length] != ':') {
-                ESP_LOGE(GATTS_TAG, "Idle characteristic payload formatted incorrectly");
+                ESP_LOGE(BUILDBUTTON_TAG, "Idle characteristic payload formatted incorrectly");
             } else {
                 int id_length_unchanged = client_id_length == id_length;
                 if (client_id_set && id_length_unchanged &&
                     client_id_compare(client_id, param->write.value, client_id_length)) 
                 {
-                    ESP_LOGE(GATTS_TAG, "Known client, setting idle flag");
+                    ESP_LOGE(BUILDBUTTON_TAG, "Known client, setting idle flag");
                 } else {
-                    ESP_LOGE(GATTS_TAG, "Unknown client, storing new Client ID");
+                    ESP_LOGE(BUILDBUTTON_TAG, "Unknown client, storing new Client ID");
                     write_client_id_to_nvs(param->write.value, id_length);
                     fetch_client_id_from_nvs(client_id, &client_id_length);
                     client_id_set = client_id_length > 0;
@@ -605,10 +599,10 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
         break;
     }
     case ESP_GATTS_MTU_EVT:
-        ESP_LOGI(GATTS_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
+        ESP_LOGI(BUILDBUTTON_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
         break;
     case ESP_GATTS_CREATE_EVT:
-        ESP_LOGI(GATTS_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
+        ESP_LOGI(BUILDBUTTON_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
         gl_profile_tab[IDLE_APP_ID].service_handle = param->create.service_handle;
         gl_profile_tab[IDLE_APP_ID].char_uuid.len = ESP_UUID_LEN_16;
         gl_profile_tab[IDLE_APP_ID].char_uuid.uuid.uuid16 = GATTS_CHAR_UUID_TEST_B;
@@ -620,11 +614,11 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
                                                         b_property,
                                                         NULL, NULL);
         if (add_char_ret){
-            ESP_LOGE(GATTS_TAG, "add char failed, error code =%x",add_char_ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "add char failed, error code =%x",add_char_ret);
         }
         break;
     case ESP_GATTS_ADD_CHAR_EVT:
-        ESP_LOGI(GATTS_TAG, "ADD_CHAR_EVT, status %d,  attr_handle %d, service_handle %d\n",
+        ESP_LOGI(BUILDBUTTON_TAG, "ADD_CHAR_EVT, status %d,  attr_handle %d, service_handle %d\n",
                  param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
 
         gl_profile_tab[IDLE_APP_ID].char_handle = param->add_char.attr_handle;
@@ -636,24 +630,24 @@ static void gatts_idle_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t g
         break;
     case ESP_GATTS_ADD_CHAR_DESCR_EVT:
         gl_profile_tab[IDLE_APP_ID].descr_handle = param->add_char_descr.attr_handle;
-        ESP_LOGI(GATTS_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d\n",
+        ESP_LOGI(BUILDBUTTON_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d\n",
                  param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
         break;
     case ESP_GATTS_START_EVT:
-        ESP_LOGI(GATTS_TAG, "SERVICE_START_EVT, status %d, service_handle %d\n",
+        ESP_LOGI(BUILDBUTTON_TAG, "SERVICE_START_EVT, status %d, service_handle %d\n",
                  param->start.status, param->start.service_handle);
         break;
     case ESP_GATTS_CONNECT_EVT:
-        ESP_LOGI(GATTS_TAG, "CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:",
+        ESP_LOGI(BUILDBUTTON_TAG, "CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:",
                  param->connect.conn_id,
                  param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
                  param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
         gl_profile_tab[IDLE_APP_ID].conn_id = param->connect.conn_id;
         break;
     case ESP_GATTS_CONF_EVT:
-        ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONF_EVT status %d", param->conf.status);
+        ESP_LOGI(BUILDBUTTON_TAG, "ESP_GATTS_CONF_EVT status %d", param->conf.status);
         if (param->conf.status != ESP_GATT_OK){
-            esp_log_buffer_hex(GATTS_TAG, param->conf.value, param->conf.len);
+            esp_log_buffer_hex(BUILDBUTTON_TAG, param->conf.value, param->conf.len);
         }
         break;
     case ESP_GATTS_EXEC_WRITE_EVT:
@@ -680,7 +674,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         if (param->reg.status == ESP_GATT_OK) {
             gl_profile_tab[param->reg.app_id].gatts_if = gatts_if;
         } else {
-            ESP_LOGI(GATTS_TAG, "Reg app failed, app_id %04x, status %d",
+            ESP_LOGI(BUILDBUTTON_TAG, "Reg app failed, app_id %04x, status %d",
                     param->reg.app_id,
                     param->reg.status);
             return;
@@ -715,67 +709,67 @@ void app_main()
     ESP_ERROR_CHECK( ret );
 
     fetch_client_id_from_nvs(client_id, &client_id_length);
-    esp_log_buffer_hex(GATTS_TAG, client_id, client_id_length);
+    esp_log_buffer_hex(BUILDBUTTON_TAG, client_id, client_id_length);
     client_id_set = client_id_length > 0;
 
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
         wake_up_handled = client_id_set == 0;
 
-        ESP_LOGE(GATTS_TAG, "WAKE UP CAUSE: DEEP SLEEP INTERRUPT");
+        ESP_LOGE(BUILDBUTTON_TAG, "WAKE UP CAUSE: DEEP SLEEP INTERRUPT");
 
         xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
 
         esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
         ret = esp_bt_controller_init(&bt_cfg);
         if (ret) {
-            ESP_LOGE(GATTS_TAG, "%s initialize controller failed", __func__);
+            ESP_LOGE(BUILDBUTTON_TAG, "%s initialize controller failed", __func__);
             return;
         }
 
         ret = esp_bt_controller_enable(ESP_BT_MODE_BTDM);
         if (ret) {
-            ESP_LOGE(GATTS_TAG, "%s enable controller failed", __func__);
+            ESP_LOGE(BUILDBUTTON_TAG, "%s enable controller failed", __func__);
             return;
         }
         ret = esp_bluedroid_init();
         if (ret) {
-            ESP_LOGE(GATTS_TAG, "%s init bluetooth failed", __func__);
+            ESP_LOGE(BUILDBUTTON_TAG, "%s init bluetooth failed", __func__);
             return;
         }
         ret = esp_bluedroid_enable();
         if (ret) {
-            ESP_LOGE(GATTS_TAG, "%s enable bluetooth failed", __func__);
+            ESP_LOGE(BUILDBUTTON_TAG, "%s enable bluetooth failed", __func__);
             return;
         }
 
         ret = esp_ble_gatts_register_callback(gatts_event_handler);
         if (ret){
-            ESP_LOGE(GATTS_TAG, "gatts register error, error code = %x", ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "gatts register error, error code = %x", ret);
             return;
         }
         ret = esp_ble_gap_register_callback(gap_event_handler);
         if (ret){
-            ESP_LOGE(GATTS_TAG, "gap register error, error code = %x", ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "gap register error, error code = %x", ret);
             return;
         }
         ret = esp_ble_gatts_app_register(TRIGGER_APP_ID);
         if (ret){
-            ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "gatts app register error, error code = %x", ret);
             return;
         }
         ret = esp_ble_gatts_app_register(IDLE_APP_ID);
         if (ret){
-            ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "gatts app register error, error code = %x", ret);
             return;
         }
         esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(500);
         if (local_mtu_ret){
-            ESP_LOGE(GATTS_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
+            ESP_LOGE(BUILDBUTTON_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
         }
 
     } else {
-        ESP_LOGE(GATTS_TAG, "WAKE UP CAUSE: NORMAL BOOT-UP");
-        ESP_LOGE(GATTS_TAG, "entering deep sleep right after boot-up");
+        ESP_LOGE(BUILDBUTTON_TAG, "WAKE UP CAUSE: NORMAL BOOT-UP");
+        ESP_LOGE(BUILDBUTTON_TAG, "entering deep sleep right after boot-up");
         enter_deep_sleep();
     }
     return;

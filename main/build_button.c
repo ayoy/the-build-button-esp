@@ -192,6 +192,7 @@ uint8_t client_id[128];
 size_t client_id_length = 0;
 uint8_t is_idle = 1;
 const uint8_t kButtonGPIO = 25;
+const uint8_t kLEDGPIO = 26;
 uint8_t wake_up_handled = 0;
 
 void trigger_action()
@@ -222,6 +223,16 @@ void handle_button_press()
         ESP_LOGE(BUILDBUTTON_TAG, "INTERRUPTING CURRENT RUN ON USER REQUEST");
         update_idle_flag(1);
     }
+}
+
+void handle_button_touch_down()
+{
+    gpio_pad_select_gpio(kLEDGPIO);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(kLEDGPIO, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(kLEDGPIO, GPIO_PULLDOWN_ONLY);
+
+    gpio_set_level(kLEDGPIO, 1);
 }
 
 TaskHandle_t deep_sleep_task_handle = NULL;
@@ -700,7 +711,10 @@ void app_main()
 
         ESP_LOGE(BUILDBUTTON_TAG, "WAKE UP CAUSE: DEEP SLEEP INTERRUPT");
 
-        start_button_task(kButtonGPIO, &handle_button_press, NULL, 3000 / portTICK_PERIOD_MS);
+        set_led_pwm_gpio(kLEDGPIO);
+        start_button_task(kButtonGPIO, &handle_button_press, 
+            NULL, 3000 / portTICK_PERIOD_MS,
+            handle_button_touch_down);
 
         esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
         ret = esp_bt_controller_init(&bt_cfg);

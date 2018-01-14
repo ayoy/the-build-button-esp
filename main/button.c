@@ -9,6 +9,7 @@ static uint8_t button_pin = 0;
 static void (*button_press_handler)(void) = NULL;
 static void (*button_long_press_handler)(void) = NULL;
 static TickType_t button_long_press_interval = 0;
+static void (*button_touch_down_handler)(void) = NULL;
 
 #define TIMER_DIVIDER         16  //  Hardware timer clock divider
 #define TIMER_SCALE           (TIMER_BASE_CLK / TIMER_DIVIDER) * 1000  // convert counter value to milliseconds
@@ -32,7 +33,7 @@ void start_timer()
     config.divider = TIMER_DIVIDER;
     config.counter_dir = TIMER_COUNT_UP;
     config.counter_en = TIMER_PAUSE;
-    config.alarm_en = TIMER_ALARM_EN;
+    config.alarm_en = TIMER_ALARM_DIS;
     config.intr_type = TIMER_INTR_LEVEL;
     config.auto_reload = 0;
     timer_init(TIMER_GROUP_0, TIMER_0, &config);
@@ -60,15 +61,21 @@ void button_handler_task(void *pvParameter)
     gpio_set_pull_mode(button_pin, GPIO_PULLUP_ONLY);
 
     int level = gpio_get_level(button_pin);
+    bool triggered_at_startup = 0;
     if (level == 0) {
-        ESP_LOGE(kButtonTag, "Pin %i low, but should be high -,-", button_pin);
+        ESP_LOGE(kButtonTag, "Pin %i low at handler task startup", button_pin);
+        triggered_at_startup = 1;
     }
     while(1) {
-        if (gpio_get_level(button_pin) != level) {
+        if (gpio_get_level(button_pin) != level || triggered_at_startup) {
+            triggered_at_startup = 0;
             level = gpio_get_level(button_pin);
             if (level == 0) {
                 ESP_LOGI(kButtonTag, "Pin %i low!", button_pin);
                 start_timer();
+                if (button_touch_down_handler) {
+                    button_touch_down_handler();
+                }
             } else {
                 if (is_timer_running) {
                     ESP_LOGI(kButtonTag, "Pin %i high again!", button_pin);
@@ -96,12 +103,14 @@ void button_handler_task(void *pvParameter)
 
 void start_button_task(uint8_t gpio_pin, void (*press_handler)(void), 
     void (*long_press_handler)(void), 
-    TickType_t long_press_interval)
+    TickType_t long_press_interval,
+    void (*touch_down_handler)(void))
 {
     button_pin = gpio_pin;
     button_press_handler = press_handler;
     button_long_press_handler = long_press_handler;
     button_long_press_interval = long_press_interval;
+    button_touch_down_handler = touch_down_handler;
     xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
 }
 

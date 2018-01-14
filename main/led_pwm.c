@@ -6,7 +6,7 @@
 
 static const char * kLEDPWMTag = "LED_PWM";
 
-static const uint8_t kLEDGPIO = 26;
+static uint8_t LED_gpio = 0;
 static const uint16_t kLEDFadeTime = 1500;
 static const uint16_t kLEDDutyMax = 8191;
 static const uint16_t kLEDDutyMin = 0;
@@ -26,12 +26,12 @@ void tear_down_pwm_task(ledc_channel_config_t *config)
 
 void pwm_task(void *pvParameter)
 {
-    ESP_LOGI(kLEDPWMTag, "Starting LED PWM task");
+    ESP_LOGI(kLEDPWMTag, "Starting LED PWM task at pin %d", LED_gpio);
 
-    gpio_pad_select_gpio(kLEDGPIO);
+    gpio_pad_select_gpio(LED_gpio);
     /* Set the GPIO as a push/pull output */
-    gpio_set_direction(kLEDGPIO, GPIO_MODE_OUTPUT);
-    gpio_set_pull_mode(kLEDGPIO, GPIO_PULLDOWN_ONLY);
+    gpio_set_direction(LED_gpio, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode(LED_gpio, GPIO_PULLDOWN_ONLY);
 
     ledc_timer_config_t ledc_timer = {
         .duty_resolution = LEDC_TIMER_13_BIT, // resolution of PWM duty
@@ -41,7 +41,7 @@ void pwm_task(void *pvParameter)
     };
 
     ledc_channel_config_t ledc_config = {
-        .gpio_num = kLEDGPIO,
+        .gpio_num = LED_gpio,
         .speed_mode = LEDC_HIGH_SPEED_MODE,
         .duty = 200,
         .channel = LEDC_CHANNEL_0,
@@ -75,6 +75,11 @@ void pwm_task(void *pvParameter)
 void start_led_pwm_task() 
 {
     xTaskCreate(&pwm_task, "LED_PWM_task", 3072, NULL, 5, &pwm_task_handle);
+}
+
+void set_led_pwm_gpio(uint8_t gpio_pin)
+{
+    LED_gpio = gpio_pin;
 }
 
 uint8_t is_led_pwm_enabled()

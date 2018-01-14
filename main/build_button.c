@@ -41,6 +41,7 @@
 
 #include "client_id.h"
 #include "led_pwm.h"
+#include "button.h"
 
 #define BUILDBUTTON_TAG "BUILD_BUTTON"
 
@@ -190,7 +191,7 @@ int client_id_set = 0;
 uint8_t client_id[128];
 size_t client_id_length = 0;
 uint8_t is_idle = 1;
-#define BUTTON_GPIO (25)
+const uint8_t kButtonGPIO = 25;
 uint8_t wake_up_handled = 0;
 
 void trigger_action()
@@ -209,35 +210,17 @@ void trigger_action()
     }
 }
 
-void button_handler_task(void *pvParameter)
+
+void handle_button_press()
 {
-    ESP_LOGE(BUILDBUTTON_TAG, "Starting button handler task");
-
-    gpio_pad_select_gpio(BUTTON_GPIO);
-    gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY);
-
-    int level = gpio_get_level(BUTTON_GPIO);
-    if (level == 0) {
-        ESP_LOGE(BUILDBUTTON_TAG, "Pin %i low, but should be high -,-", BUTTON_GPIO);
-    }
-    while(1) {
-        if (gpio_get_level(BUTTON_GPIO) != level) {
-            level = gpio_get_level(BUTTON_GPIO);
-            if (level == 0) {
-                ESP_LOGI(BUILDBUTTON_TAG, "Pin %i low!", BUTTON_GPIO);
-                if (is_idle) {
-                    if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
-                        ESP_LOGE(BUILDBUTTON_TAG, "TRIGGERED FROM BUTTON HANDLER TASK");
-                        trigger_action();
-                    }
-                } else {
-                    ESP_LOGE(BUILDBUTTON_TAG, "INTERRUPTING CURRENT RUN ON USER REQUEST");
-                    update_idle_flag(1);
-                }
-            }
+    if (is_idle) {
+        if (gl_profile_tab[TRIGGER_APP_ID].gatts_if != 0) {
+            ESP_LOGE(BUILDBUTTON_TAG, "TRIGGERED FROM BUTTON HANDLER TASK");
+            trigger_action();
         }
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+    } else {
+        ESP_LOGE(BUILDBUTTON_TAG, "INTERRUPTING CURRENT RUN ON USER REQUEST");
+        update_idle_flag(1);
     }
 }
 
@@ -245,7 +228,7 @@ TaskHandle_t deep_sleep_task_handle = NULL;
 
 void enter_deep_sleep()
 {
-    const uint64_t ext_wakeup_pin_mask = 1ULL << BUTTON_GPIO;
+    const uint64_t ext_wakeup_pin_mask = 1ULL << kButtonGPIO;
     esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_mask, ESP_EXT1_WAKEUP_ALL_LOW);
 
     if (esp_bluedroid_get_status() != ESP_BLUEDROID_STATUS_UNINITIALIZED) {
@@ -717,7 +700,7 @@ void app_main()
 
         ESP_LOGE(BUILDBUTTON_TAG, "WAKE UP CAUSE: DEEP SLEEP INTERRUPT");
 
-        xTaskCreate(&button_handler_task, "button_handler_task", 3072, NULL, 5, NULL);
+        start_button_task(kButtonGPIO, &handle_button_press, NULL, 3000 / portTICK_PERIOD_MS);
 
         esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
         ret = esp_bt_controller_init(&bt_cfg);
